@@ -7,6 +7,12 @@ import queue
 import inspect  # Import inspect to check method signatures
 
 # --- Global Queue for UI Updates from Background Threads ---
+def resource_path(relative_path):
+    try:
+        base_path = sys._MEIPASS
+    except AttributeError:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
 ui_update_queue = queue.Queue()
 
 
@@ -161,7 +167,7 @@ class App(customtkinter.CTk):
         self.all_apps_categorized = {'external': [], 'system': []}
 
         # --- Initial Setup ---
-        self.adb_path = self.get_tool_path("adb")
+        self.adb_path = resource_path(self.get_tool_path("adb"))
         if not self.adb_path:
             self.status_label.configure(text_color="red", text="Error: ADB not found. Check console.")
             print("\n!!! CRITICAL ERROR: ADB executable not found. !!!")
