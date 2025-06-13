@@ -7,13 +7,23 @@ import queue
 import inspect  # Import inspect to check method signatures
 
 # --- Global Queue for UI Updates from Background Threads ---
+ui_update_queue = queue.Queue()
+
+
+# --- resource_path function ---
 def resource_path(relative_path):
+    """
+    Get the absolute path to a resource, useful for PyInstaller.
+    This function expects relative_path to be a valid string, not None.
+    """
     try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
         base_path = sys._MEIPASS
     except AttributeError:
         base_path = os.path.abspath(".")
+
+    # No longer checks for None here; the caller ensures it's not None.
     return os.path.join(base_path, relative_path)
-ui_update_queue = queue.Queue()
 
 
 # --- CTkMessageBox Class ---
@@ -112,7 +122,6 @@ class App(customtkinter.CTk):
                                                       command=self.populate_device_combobox)
         self.refresh_button.grid(row=2, column=0, padx=10, pady=10, sticky="ew")
 
-
         # Search label
         self.search_label = customtkinter.CTkLabel(self.control_frame, text="Search Package:")
         self.search_label.grid(row=3, column=0, padx=10, pady=(10, 0), sticky="w")
@@ -167,8 +176,22 @@ class App(customtkinter.CTk):
         self.all_apps_categorized = {'external': [], 'system': []}
 
         # --- Initial Setup ---
-        self.adb_path = resource_path(self.get_tool_path("adb"))
-        if not self.adb_path:
+        # Get the potential path to ADB
+        adb_raw_path = self.get_tool_path("adb")
+
+        # Now, handle if ADB was found or not
+        if adb_raw_path:
+            try:
+                # If a path was found, then resolve it using resource_path
+                self.adb_path = resource_path(adb_raw_path)
+                print(f"[DEBUG] Final ADB path set to: {self.adb_path}")
+            except Exception as e:  # Catch any error during resource_path conversion
+                self.adb_path = None
+                self.status_label.configure(text_color="red", text=f"Error: ADB path invalid. {e}")
+                print(f"[ERROR] Could not set ADB path after resource_path: {e}")
+        else:
+            # If get_tool_path already returned None, ADB was not found.
+            self.adb_path = None
             self.status_label.configure(text_color="red", text="Error: ADB not found. Check console.")
             print("\n!!! CRITICAL ERROR: ADB executable not found. !!!")
             print(
@@ -252,6 +275,7 @@ class App(customtkinter.CTk):
             return {}
 
         devices = {}
+        # Use self.adb_path directly as it's now guaranteed to be a string or None
         adb_command = [self.adb_path, "devices"]
         print(f"[DEBUG] Running ADB command: {' '.join(adb_command)}")
         try:
@@ -566,9 +590,7 @@ class App(customtkinter.CTk):
         )
         no_button.grid(row=0, column=1, padx=10)
 
-    # FIX: Added 'dialog' as an argument to execute_delete_app_in_thread
     def execute_delete_app_in_thread(self, package_name_raw, dialog):
-        # Destroy the dialog immediately when the "Yes" button is pressed
         dialog.destroy()
 
         true_package_name = package_name_raw
