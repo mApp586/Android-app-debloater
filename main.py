@@ -1,17 +1,73 @@
-from tkinter import messagebox
-
 import customtkinter
 import subprocess
 import os
 import sys
 import threading
 import queue
+import inspect  # Import inspect to check method signatures
 
 # --- Global Queue for UI Updates from Background Threads ---
 ui_update_queue = queue.Queue()
 
 
+# --- CTkMessageBox Class ---
+class CTkMessageBox(customtkinter.CTkToplevel):
+    """
+    A customizable message box for CustomTkinter applications.
+    Can be used for info, warning, or error messages.
+    """
 
+    def __init__(self, parent_window, title="Message", message="Default message.",
+                 icon_type="info", button_text="OK", width=300, height=150):
+        # Debug print to confirm this __init__ is being called
+        print(f"[DEBUG_MSG_BOX] CTkMessageBox __init__ called with signature: {inspect.signature(self.__init__)}")
+
+        super().__init__(parent_window)
+
+        self.title(title)
+        self.geometry(f"{width}x{height}")
+        self.transient(parent_window)  # Make dialog close with parent
+        self.grab_set()  # Make dialog modal (blocks parent interaction)
+
+        # Center the dialog on the parent window
+        parent_window.update_idletasks()
+        x = parent_window.winfo_x() + (parent_window.winfo_width() // 2) - (self.winfo_width() // 2)
+        y = parent_window.winfo_y() + (parent_window.winfo_height() // 2) - (self.winfo_height() // 2)
+        self.geometry(f"+{x}+{y}")
+
+        self.resizable(True, True)
+
+        # Configure grid layout for content
+        self.grid_rowconfigure(0, weight=1)
+        self.grid_columnconfigure(0, weight=1)
+
+        # Message Label
+        self.message_label = customtkinter.CTkLabel(
+            self,
+            text=message,
+            wraplength=width - 40,
+            justify="center",
+            font=customtkinter.CTkFont(size=14)
+        )
+        self.message_label.grid(row=0, column=0, padx=20, pady=20, sticky="nsew")
+
+        # OK Button
+        self.ok_button = customtkinter.CTkButton(
+            self,
+            text=button_text,
+            command=self.destroy
+        )
+        self.ok_button.grid(row=1, column=0, padx=20, pady=(0, 20), sticky="s")
+
+        # Set appearance based on icon_type
+        if icon_type == "error":
+            self.message_label.configure(text_color="red")
+            self.ok_button.configure(fg_color="red", hover_color="darkred")
+        elif icon_type == "warning":
+            self.message_label.configure(text_color="orange")
+            self.ok_button.configure(fg_color="orange", hover_color="darkorange")
+
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
 
 
 class App(customtkinter.CTk):
@@ -19,22 +75,20 @@ class App(customtkinter.CTk):
         super().__init__()
 
         # --- Window Configuration ---
-
-        self.title("USB Android App Debloater")  # Updated title
+        self.title("USB Android App Debloater")
         self.geometry("850x650")
-        self.resizable(True, True)
+        self.resizable(False, False)
 
         # Configure grid layout for the main window (1 row, 2 columns)
         self.grid_rowconfigure(0, weight=1)
-        self.grid_columnconfigure(1, weight=1)  # Right column (for app lists) gets extra space
+        self.grid_columnconfigure(1, weight=1)
 
-        # Wraplength for app labels within each scroll frame
-        self.app_list_wraplength = 390  # Adjusted for two side-by-side frames if they were, or just for more compact view
+        self.app_list_wraplength = 390
 
         # --- Control Panel Frame (Left Side) ---
         self.control_frame = customtkinter.CTkFrame(self, width=200, corner_radius=10)
         self.control_frame.grid(row=0, column=0, padx=20, pady=20, sticky="nsew")
-        self.control_frame.grid_rowconfigure(6, weight=1)  # Adjusted for new search widgets
+        self.control_frame.grid_rowconfigure(7, weight=1)  # Adjusted for new About button
 
         # Device selection label
         self.device_label = customtkinter.CTkLabel(self.control_frame, text="Select Device:")
@@ -52,10 +106,6 @@ class App(customtkinter.CTk):
                                                       command=self.populate_device_combobox)
         self.refresh_button.grid(row=2, column=0, padx=10, pady=10, sticky="ew")
 
-        self.refresh_button = customtkinter.CTkButton(self.control_frame,
-                                                      text="About Software",
-                                                      command=self.about_me)
-        self.refresh_button.grid(row=8, column=0, padx=10, pady=10, sticky="ew")
 
         # Search label
         self.search_label = customtkinter.CTkLabel(self.control_frame, text="Search Package:")
@@ -71,37 +121,43 @@ class App(customtkinter.CTk):
         self.status_label = customtkinter.CTkLabel(self.control_frame, text="", text_color="green", wraplength=180)
         self.status_label.grid(row=5, column=0, padx=10, pady=(0, 10), sticky="ew")
 
+        # --- About Me Button ---
+        self.about_button = customtkinter.CTkButton(
+            self.control_frame,
+            text="About This App",
+            command=self.about_me
+        )
+        self.about_button.grid(row=6, column=0, padx=10, pady=10, sticky="ew")
+
         # --- App Display Container (Right Side) ---
-        # This frame will hold both scrollable app lists
         self.app_display_container = customtkinter.CTkFrame(self, corner_radius=10)
         self.app_display_container.grid(row=0, column=1, padx=20, pady=20, sticky="nsew")
-        self.app_display_container.grid_rowconfigure(0, weight=1)  # External Apps frame
-        self.app_display_container.grid_rowconfigure(1, weight=1)  # System Apps frame
-        self.app_display_container.grid_columnconfigure(0, weight=1)  # Only one column for content
+        self.app_display_container.grid_rowconfigure(0, weight=1)
+        self.app_display_container.grid_rowconfigure(1, weight=1)
+        self.app_display_container.grid_columnconfigure(0, weight=1)
 
         # --- External Apps Scrollable Frame ---
         self.external_apps_scroll_frame = customtkinter.CTkScrollableFrame(
             self.app_display_container,
             label_text="External Apps:",
-            height=250,  # Set a fixed height initially, will expand with weight
+            height=250,
             corner_radius=10
         )
         self.external_apps_scroll_frame.grid(row=0, column=0, padx=10, pady=(10, 5), sticky="nsew")
-        self.external_apps_scroll_frame.grid_columnconfigure(0, weight=1)  # App info label
-        self.external_apps_scroll_frame.grid_columnconfigure(1, weight=0)  # Delete button
+        self.external_apps_scroll_frame.grid_columnconfigure(0, weight=1)
+        self.external_apps_scroll_frame.grid_columnconfigure(1, weight=0)
 
         # --- System Apps Scrollable Frame ---
         self.system_apps_scroll_frame = customtkinter.CTkScrollableFrame(
             self.app_display_container,
             label_text="System Apps:",
-            height=250,  # Set a fixed height initially, will expand with weight
+            height=250,
             corner_radius=10
         )
         self.system_apps_scroll_frame.grid(row=1, column=0, padx=10, pady=(5, 10), sticky="nsew")
-        self.system_apps_scroll_frame.grid_columnconfigure(0, weight=1)  # App info label
-        self.system_apps_scroll_frame.grid_columnconfigure(1, weight=0)  # Delete button
+        self.system_apps_scroll_frame.grid_columnconfigure(0, weight=1)
+        self.system_apps_scroll_frame.grid_columnconfigure(1, weight=0)
 
-        # Store categorized apps: {'external': [], 'system': []}
         self.all_apps_categorized = {'external': [], 'system': []}
 
         # --- Initial Setup ---
@@ -115,10 +171,6 @@ class App(customtkinter.CTk):
         self.populate_device_combobox()
         self.after(10000, self.populate_device_combobox)
         self.after(100, self.process_ui_queue)
-
-    def about_me(self):
-        messagebox.showinfo("About US: Android APP Debloater", "Made by mApp586 with the help of AI")
-
 
     def process_ui_queue(self):
         try:
@@ -140,13 +192,11 @@ class App(customtkinter.CTk):
         final_tool_path = None
         exe_name = f"{tool_name}.exe" if sys.platform == "win32" else tool_name
 
-        # 1. Try script_dir/<tool_name>/<tool_name>.exe (e.g., .\adb\adb.exe)
         candidate_path_specific_folder = os.path.join(script_dir, tool_name, exe_name)
         if os.path.exists(candidate_path_specific_folder) and os.path.isfile(candidate_path_specific_folder):
             final_tool_path = candidate_path_specific_folder
             print(f"[DEBUG] Trying: {final_tool_path}")
 
-        # 2. If not found, check system PATH
         if final_tool_path is None:
             print(f"[DEBUG] {tool_name} not found in specific folder. Checking system PATH...")
             try:
@@ -160,7 +210,6 @@ class App(customtkinter.CTk):
             except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired) as e:
                 print(f"[DEBUG] Error trying 'where'/'which' for {tool_name}: {e}")
 
-        # Final verification that the found path is executable
         if final_tool_path:
             try:
                 print(f"[DEBUG] Verifying executability of {final_tool_path}...")
@@ -247,7 +296,6 @@ class App(customtkinter.CTk):
             self.on_device_selected(self.device_combobox.get())
         else:
             self.device_combobox.set("No devices found")
-            # Clear both frames and display message
             self._clear_and_display_message_in_frames("Please connect an ADB device to list applications.")
 
     def on_device_selected(self, selected_device_serial):
@@ -301,7 +349,6 @@ class App(customtkinter.CTk):
             return {'external': [], 'system': []}
 
         all_apps = []
-        # Command changed to list ALL packages, not just third-party
         adb_command = [self.adb_path, "-s", device_serial, "shell", "pm", "list", "packages", "-f"]
         print(f"[DEBUG] Running ADB command to list ALL apps: {' '.join(adb_command)}")
         try:
@@ -328,18 +375,14 @@ class App(customtkinter.CTk):
             external_apps = []
             system_apps = []
             for app in all_apps:
-                # Common system app paths. This heuristic isn't perfect but generally reliable.
-                # Android 10+ uses /data/app/~~<random_id>/<package_name> and /data/app/~~<random_id>/<package_name>-<version_code>/base.apk
-                # System apps usually reside in /system/app, /system/priv-app, /vendor/app, /product/app
                 if app['apk_path'].startswith('/system/app/') or \
                         app['apk_path'].startswith('/system/priv-app/') or \
                         app['apk_path'].startswith('/vendor/app/') or \
                         app['apk_path'].startswith('/product/app/') or \
-                        app['apk_path'].startswith('/data/app/~~/'):  # Some core components might show up here
+                        app['apk_path'].startswith('/data/app/~~/'):
                     system_apps.append(app)
                 else:
-                    external_apps.append(
-                        app)  # Anything not clearly a system path is considered external/user-installed
+                    external_apps.append(app)
 
             print(
                 f"[DEBUG] get_installed_apps returning {len(external_apps)} external and {len(system_apps)} system apps.")
@@ -393,7 +436,6 @@ class App(customtkinter.CTk):
 
         # Populate External Apps Frame
         if external_apps_to_display:
-            # Removed explicit header labels as the CTkScrollableFrame has its own label_text
             for i, app_info in enumerate(external_apps_to_display):
                 app_frame = customtkinter.CTkFrame(
                     self.external_apps_scroll_frame,
@@ -425,7 +467,6 @@ class App(customtkinter.CTk):
                 )
                 delete_button.grid(row=0, column=1, padx=(5, 10), pady=5, sticky="e")
         else:
-            # If no external apps are found (or match filter), display message in its frame
             message_text = "No matching external apps found." if search_query else "No external apps found."
             message_label = customtkinter.CTkLabel(
                 self.external_apps_scroll_frame,
@@ -438,7 +479,6 @@ class App(customtkinter.CTk):
 
         # Populate System Apps Frame
         if system_apps_to_display:
-            # Removed explicit header labels
             for i, app_info in enumerate(system_apps_to_display):
                 app_frame = customtkinter.CTkFrame(
                     self.system_apps_scroll_frame,
@@ -464,13 +504,12 @@ class App(customtkinter.CTk):
                 delete_button = customtkinter.CTkButton(
                     app_frame,
                     text="Delete",
-                    fg_color="gray",  # Different color for system apps
+                    fg_color="gray",
                     hover_color="darkred",
                     command=lambda pkg=app_info['package_name']: self.confirm_and_delete_app(pkg)
                 )
                 delete_button.grid(row=0, column=1, padx=(5, 10), pady=5, sticky="e")
         else:
-            # If no system apps are found (or match filter), display message in its frame
             message_text = "No matching system apps found." if search_query else "No system apps found."
             message_label = customtkinter.CTkLabel(
                 self.system_apps_scroll_frame,
@@ -521,7 +560,11 @@ class App(customtkinter.CTk):
         )
         no_button.grid(row=0, column=1, padx=10)
 
-    def execute_delete_app_in_thread(self, package_name_raw):
+    # FIX: Added 'dialog' as an argument to execute_delete_app_in_thread
+    def execute_delete_app_in_thread(self, package_name_raw, dialog):
+        # Destroy the dialog immediately when the "Yes" button is pressed
+        dialog.destroy()
+
         true_package_name = package_name_raw
         if '=' in package_name_raw:
             true_package_name = package_name_raw.split('=')[-1]
@@ -576,6 +619,46 @@ class App(customtkinter.CTk):
             ui_update_queue.put(
                 {"type": "status", "text": f"An unexpected error occurred during deletion: {e}", "color": "red"})
             print(f"An unexpected error occurred during uninstallation of {package_name}: {e}")
+
+    # --- about_me function ---
+    def about_me(self):
+        """
+        Displays an informational message box about the application.
+        """
+        print(f"[DEBUG_ABOUT_ME] Type of CTkMessageBox: {type(CTkMessageBox)}")
+        import inspect
+        try:
+            print(f"[DEBUG_ABOUT_ME] Signature of CTkMessageBox.__init__: {inspect.signature(CTkMessageBox.__init__)}")
+        except AttributeError:
+            print(
+                "[DEBUG_ABOUT_ME] CTkMessageBox.__init__ has no signature attribute, possibly not a class or misdefined.")
+
+        app_info_message = (
+            "ADB App Manager\n\n"
+            "Version: 1.0\n"
+            "Developed by: Your mApp586\n\n"
+            "This application allows you to list and manage\n"
+            "both external (user-installed) and system applications\n"
+            "on your connected Android device via ADB.\n\n"
+            "Note: Deleting system apps may require a rooted device\n"
+            "and can potentially cause instability. Proceed with caution."
+        )
+        try:
+            CTkMessageBox(
+                self,
+                title="About ADB App Manager",
+                message=app_info_message,
+                icon_type="info",
+                width=450,
+                height=280
+            )
+        except TypeError as e:
+            print(f"[ERROR] TypeError when calling CTkMessageBox in about_me: {e}")
+            print("This often means there's a conflict in the CTkMessageBox definition or how it's imported.")
+            print(
+                "Please ensure you are running the latest version of the script and try restarting your Python environment/IDE.")
+        except Exception as e:
+            print(f"[ERROR] An unexpected error occurred in about_me: {e}")
 
 
 if __name__ == "__main__":
